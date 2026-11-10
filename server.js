@@ -1,48 +1,50 @@
-const http = require('http');
-const url = require('url');
-const querystring = require('querystring');
+require('dotenv').config();
+const express = require('express');
+const cors = require('cors');
+const { db, verifyFirebaseConnection } = require('./database/firebase');
+const requireUsuario = require('./middlewares/usuario.middleware');
+const materiasRoutes = require('./routes/materias.routes');
+const tareasRoutes = require('./routes/tareas.routes');
 
-// Import routes
-const userRoutes = require('./routes/user.routes');
-
-// Get environment variables
+const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Create server
-const server = http.createServer((req, res) => {
-  // Set CORS headers
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-  res.setHeader('Content-Type', 'application/json');
+app.use(cors());
+app.use(express.json());
 
-  // Handle preflight requests
-  if (req.method === 'OPTIONS') {
-    res.writeHead(200);
-    res.end();
-    return;
-  }
-
-  // Parse URL
-  const parsedUrl = url.parse(req.url, true);
-  const pathname = parsedUrl.pathname;
-
-  // Route requests
-  if (pathname.startsWith('/api/users')) {
-    userRoutes(req, res, pathname, parsedUrl.query);
-  } else if (pathname === '/') {
-    res.writeHead(200);
-    res.end(JSON.stringify({ message: 'Servidor backend activo' }));
-  } else {
-    res.writeHead(404);
-    res.end(JSON.stringify({ error: 'Ruta no encontrada' }));
+// Salud del servidor (sin usuario)
+app.get('/api/health', async (req, res) => {
+  try {
+    await db.listCollections();
+    res.json({ status: 'ok', firebase: 'conectado' });
+  } catch (error) {
+    res.status(500).json({ status: 'error', firebase: 'sin conexión' });
   }
 });
 
-// Start server
-server.listen(PORT, () => {
-  console.log(`Servidor ejecutándose en puerto ${PORT}`);
-  console.log(`http://localhost:${PORT}`);
+// Rutas de la API (todas requieren el header x-user-id)
+app.use('/api/materias', requireUsuario, materiasRoutes);
+app.use('/api/tareas', requireUsuario, tareasRoutes);
+
+// 404 para rutas que no existen
+app.use((req, res) => {
+  res.status(404).json({ error: 'Ruta no encontrada.' });
 });
 
-module.exports = server;
+// Manejador global de errores
+app.use((error, req, res, next) => {
+  console.error('Error:', error);
+  res.status(500).json({ error: 'Error interno del servidor.' });
+});
+
+async function start() {
+  try {
+    await verifyFirebaseConnection();
+    app.listen(PORT, () => console.log(`🚀 Servidor en http://localhost:${PORT}`));
+  } catch (error) {
+    console.error('❌ No se pudo conectar a Firebase:', error.message);
+    process.exit(1);
+  }
+}
+
+start();
