@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mi racha — StudyFlow</title>
+  <meta name="description" content="Consulta tu racha y actividad de estudio en StudyFlow.">
+  <link rel="icon" href="../assets/icons/favicon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="../css/styles.css">
+  <link rel="stylesheet" href="../css/components.css">
+  <link rel="stylesheet" href="../css/app.css">
+  <link rel="stylesheet" href="../css/racha.css">
+</head>
+<body class="app" data-page="racha">
+  <a class="skip-link" href="#contenido">Saltar al contenido principal</a>
+  <div class="app-shell">
+    <div data-shell="sidebar"></div>
+    <div class="app-main">
+      <div data-shell="topbar"></div>
+      <main class="app-content streak-page" id="contenido">
+        <header class="streak-heading">
+          <span class="streak-heading__eyebrow">CONSTANCIA Y PROGRESO</span>
+          <h1>Mi racha de estudio</h1>
+          <p>Cada sesión cuenta. Mantén el ritmo y sigue construyendo el hábito.</p>
+        </header>
+        <section class="streak-hero card" aria-labelledby="streak-current-title">
+          <div class="streak-hero__icon" aria-hidden="true">🔥</div>
+          <div>
+            <p id="streak-current-title" class="streak-hero__label">Tu racha actual</p>
+            <p class="streak-hero__number"><strong id="currentStreak">0</strong> <span id="streakUnit">días</span></p>
+            <p class="streak-hero__message" id="streakMessage">Empieza hoy y construye tu primera racha.</p>
+          </div>
+        </section>
+        <section class="streak-metrics" aria-label="Actividad de hoy">
+          <article class="card streak-metric"><span class="streak-metric__icon">⏱️</span><strong id="todayMinutes">0 min</strong><span>Tiempo estudiado hoy</span></article>
+          <article class="card streak-metric"><span class="streak-metric__icon">📚</span><strong id="todaySessions">0</strong><span>Sesiones de hoy</span></article>
+          <article class="card streak-metric"><span class="streak-metric__icon">✓</span><strong id="completedTasks">0</strong><span>Tareas completadas</span></article>
+        </section>
+        <section class="card streak-tip">
+          <h2>Un día a la vez</h2>
+          <p>La racha se mantiene registrando al menos una sesión de estudio cada día. Puedes iniciar una sesión desde el Pomodoro.</p>
+          <a class="btn btn--primary" href="pomodoro.html">Iniciar sesión de estudio</a>
+        </section>
+      </main>
+    </div>
+  </div>
+  <script src="../js/api.js"></script>
+  <script src="../js/store.js"></script>
+  <script src="../js/icons.js"></script>
+  <script src="../js/store.js"></script>
+  <script src="../js/ui.js"></script>
+  <script src="../js/app.js"></script>
+  <script src="../js/racha.js"></script>
+</body>
+</html>
