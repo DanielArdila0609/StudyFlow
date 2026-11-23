@@ -1,14 +1,11 @@
-const { db } = require('../database/firebase');
-const { materiasRef, validarMateria, docToObj } = require('../models/materia.model');
-const { tareasRef } = require('../models/tarea.model');
+const materias = require('../models/materia.model');
 
 async function crearMateria(req, res, next) {
   try {
-    const { errors, data } = validarMateria(req.body);
+    const { errors, data } = materias.validarMateria(req.body);
     if (errors.length) return res.status(400).json({ errors });
-    const materia = { ...data, createdAt: Date.now() };
-    const ref = await materiasRef(req.userId).add(materia);
-    res.status(201).json({ id: ref.id, ...materia });
+    const materia = await materias.crearMateria(req.userId, data);
+    res.status(201).json(materia);
   } catch (error) {
     next(error);
   }
@@ -16,8 +13,7 @@ async function crearMateria(req, res, next) {
 
 async function listarMaterias(req, res, next) {
   try {
-    const snap = await materiasRef(req.userId).orderBy('createdAt', 'asc').get();
-    res.json(snap.docs.map(docToObj));
+    res.json(await materias.listarMaterias(req.userId));
   } catch (error) {
     next(error);
   }
@@ -25,17 +21,10 @@ async function listarMaterias(req, res, next) {
 
 async function eliminarMateria(req, res, next) {
   try {
-    const { id } = req.params;
-    const ref = materiasRef(req.userId).doc(id);
-    const doc = await ref.get();
-    if (!doc.exists) return res.status(404).json({ error: 'La materia no existe.' });
-
-    const tareasSnap = await tareasRef(req.userId).where('subjectId', '==', id).get();
-    const batch = db.batch();
-    tareasSnap.docs.forEach((t) => batch.delete(t.ref));
-    batch.delete(ref);
-    await batch.commit();
-    res.json({ mensaje: 'Materia eliminada.', tareasEliminadas: tareasSnap.size });
+    // Las tareas de la materia se eliminan en cascada (ON DELETE CASCADE)
+    const tareasEliminadas = await materias.eliminarMateria(req.userId, req.params.id);
+    if (tareasEliminadas === null) return res.status(404).json({ error: 'La materia no existe.' });
+    res.json({ mensaje: 'Materia eliminada.', tareasEliminadas });
   } catch (error) {
     next(error);
   }
@@ -43,15 +32,15 @@ async function eliminarMateria(req, res, next) {
 
 async function actualizarMateria(req, res, next) {
   try {
-    const ref = materiasRef(req.userId).doc(req.params.id);
-    const doc = await ref.get();
-    if (!doc.exists) return res.status(404).json({ error: 'La materia no existe.' });
+    const actual = await materias.obtenerMateria(req.userId, req.params.id);
+    if (!actual) return res.status(404).json({ error: 'La materia no existe.' });
 
-    const { errors, data } = validarMateria({ ...doc.data(), ...req.body });
+    const { errors, data } = materias.validarMateria({ ...actual, ...req.body });
     if (errors.length) return res.status(400).json({ errors });
 
-    await ref.update(data);
-    res.json({ id: ref.id, ...data, createdAt: doc.data().createdAt });
+    const materia = await materias.actualizarMateria(req.userId, actual.id, data);
+    if (!materia) return res.status(404).json({ error: 'La materia no existe.' });
+    res.json(materia);
   } catch (error) {
     next(error);
   }

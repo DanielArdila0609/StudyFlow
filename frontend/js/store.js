@@ -1,10 +1,9 @@
 /* =========================================================
-   StudyFlow — Capa de datos (prototipo sin backend)
-   Cuentas, sesión, materias, tareas y Pomodoro guardados en localStorage.
-   Cada cuenta tiene sus propios datos: una cuenta nueva empieza desde cero.
-
-   AVISO: es una simulación para el prototipo. En un proyecto real la
-   autenticación y los datos deben vivir en un servidor.
+   StudyFlow — Capa de datos
+   Cuentas y sesión: las gestiona el servidor (PostgreSQL + cookie HttpOnly).
+   Materias y tareas viven en el backend; en localStorage solo quedan el perfil
+   visible (nombre, universidad, foto...), el Pomodoro y el correo de la sesión
+   como pista para pintar la interfaz. Nunca contraseñas ni tokens.
    ========================================================= */
 
 window.SF = (() => {
@@ -71,19 +70,7 @@ window.SF = (() => {
     document.dispatchEvent(new CustomEvent('sf:change'));
   }
 
-  /* ---------- Contraseñas (hash simulado en el navegador) ---------- */
-  async function hashPassword(password, salt) {
-    const text = `${salt}:${password}`;
-    if (window.crypto && window.crypto.subtle) {
-      const buffer = await window.crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
-      return Array.from(new Uint8Array(buffer)).map((b) => b.toString(16).padStart(2, '0')).join('');
-    }
-    let hash = 5381;
-    for (const char of text) hash = (((hash << 5) + hash) + char.charCodeAt(0)) >>> 0;
-    return `x${hash.toString(16)}`;
-  }
-
-  /* ---------- Cuentas y sesión ---------- */
+  /* ---------- Cuenta y sesión (el servidor es la autoridad) ---------- */
   const accounts = () => read(KEYS.accounts, {});
   const account = (email) => accounts()[norm(email)] || null;
 
@@ -93,52 +80,45 @@ window.SF = (() => {
     write(KEYS.accounts, all);
   }
 
-  async function register({ fullName, email, password, provider = 'email' }) {
-    email = norm(email);
-    if (account(email)) throw new Error('exists');
+  // Cuentas guardadas por la versión anterior (simulada): se eliminan sus hashes locales.
+  function purgeLegacyCredentials() {
+    const all = accounts();
+    let changed = false;
+    Object.values(all).forEach((acc) => {
+      if (acc && ('passHash' in acc || 'salt' in acc)) { delete acc.passHash; delete acc.salt; changed = true; }
+    });
+    if (changed) write(KEYS.accounts, all);
+  }
 
-    const salt = uid();
-    const [name, ...rest] = String(fullName || '').trim().split(/\s+/);
-    const acc = {
-      email,
-      name: name || '',
-      lastName: rest.join(' '),
-      university: '',
-      career: '',
-      semester: '',
-      avatar: '',
-      provider,
-      createdAt: new Date().toISOString(),
-      salt,
-      passHash: password ? await hashPassword(password, salt) : null
-    };
-
+  // Guarda el perfil visible a partir del usuario que confirmó el servidor.
+  function adoptUser(serverUser) {
+    const email = norm(serverUser.email);
+    let acc = account(email);
+    if (!acc) {
+      const [name, ...rest] = String(serverUser.name || '').trim().split(/\s+/);
+      acc = { name: name || '', lastName: rest.join(' '), university: '', career: '', semester: '', avatar: '', provider: 'email' };
+    }
+    acc = { ...acc, id: serverUser.id, email, createdAt: serverUser.createdAt || acc.createdAt || new Date().toISOString() };
     saveAccount(acc);
-    write(KEYS.data(email), emptyData());
+    write(KEYS.session, email);
     return acc;
   }
 
+  // El registro NO inicia sesión: después se entra desde «Iniciar sesión».
+  const register = ({ fullName, email, password }) => API.register({ name: fullName, email, password });
+
+  // Devuelve el perfil si las credenciales son correctas, null si no; otros errores se propagan.
   async function authenticate(email, password) {
-    const acc = account(email);
-    if (!acc || !acc.passHash) return null;
-    const hash = await hashPassword(password, acc.salt);
-    return hash === acc.passHash ? acc : null;
+    try {
+      const { user } = await API.login({ email, password });
+      return adoptUser(user);
+    } catch (error) {
+      if (error.status === 401) return null;
+      throw error;
+    }
   }
 
-  async function checkPassword(password) {
-    const acc = currentUser();
-    if (!acc || !acc.passHash) return false;
-    return (await hashPassword(password, acc.salt)) === acc.passHash;
-  }
-
-  async function setPassword(email, password) {
-    const acc = account(email);
-    if (!acc) return false;
-    acc.salt = uid();
-    acc.passHash = await hashPassword(password, acc.salt);
-    saveAccount(acc);
-    return true;
-  }
+  const changePassword = (currentPassword, newPassword) => API.changePassword({ currentPassword, newPassword });
 
   function updateAccount(patch) {
     const acc = currentUser();
@@ -151,8 +131,15 @@ window.SF = (() => {
 
   const login = (email) => write(KEYS.session, norm(email));
 
-  function logout() {
+  function clearSession() {
     try { localStorage.removeItem(KEYS.session); } catch (error) { /* sin acceso a storage */ }
+    cache.subjects = [];
+    cache.tasks = [];
+  }
+
+  function logout() {
+    clearSession();
+    if (window.API) API.logout().catch(() => {}); // el servidor cierra la sesión y borra la cookie
   }
 
   function currentUser() {
@@ -167,6 +154,18 @@ window.SF = (() => {
       return null;
     }
     return user;
+  }
+
+  // Confirma con el servidor que la sesión sigue vigente; si no, limpia la pista local.
+  async function verifySession() {
+    if (!window.API || !currentUser()) return;
+    try {
+      const { user } = await API.me();
+      adoptUser(user);
+    } catch (error) {
+      if (error.status === 401) clearSession();
+      else console.error('No se pudo verificar la sesión:', error.message);
+    }
   }
 
   const fullName = (acc) => [acc.name, acc.lastName].filter(Boolean).join(' ') || acc.email;
@@ -219,6 +218,7 @@ window.SF = (() => {
       cache.subjects = subjects;
       cache.tasks = tasks;
     } catch (error) {
+      if (error.status === 401) { clearSession(); window.location.replace('iniciar-sesion.html'); return; }
       console.error('No se pudieron cargar los datos del backend:', error.message);
     }
   }
@@ -328,70 +328,6 @@ window.SF = (() => {
   /* ---------- Tareas ---------- */
   const tasks = () => data().tasks;
   const taskById = (id) => data().tasks.find((t) => t.id === id) || null;
-
-  function addTask({ title, subjectId = '', priority = 'medium', dueDate = '', dueTime = '', tags = [], notes = '' }) {
-    return update((d) => {
-      const task = {
-        id: uid(),
-        title: title.trim(),
-        subjectId,
-        priority,
-        dueDate,
-        dueTime,
-        tags,
-        notes,
-        subtasks: [],
-        done: false,
-        completedAt: null,
-        createdAt: Date.now()
-      };
-      d.tasks.push(task);
-      return task;
-    });
-  }
-
-  function updateTask(id, patch) {
-    update((d) => {
-      const task = d.tasks.find((t) => t.id === id);
-      if (task) Object.assign(task, patch);
-    });
-  }
-
-  function removeTask(id) {
-    update((d) => { d.tasks = d.tasks.filter((t) => t.id !== id); });
-  }
-
-  function toggleTask(id) {
-    return update((d) => {
-      const task = d.tasks.find((t) => t.id === id);
-      if (!task) return null;
-      task.done = !task.done;
-      task.completedAt = task.done ? new Date().toISOString() : null;
-      return task;
-    });
-  }
-
-  function addSubtask(taskId, text) {
-    update((d) => {
-      const task = d.tasks.find((t) => t.id === taskId);
-      if (task) task.subtasks.push({ id: uid(), text: text.trim(), done: false });
-    });
-  }
-
-  function toggleSubtask(taskId, subId) {
-    update((d) => {
-      const task = d.tasks.find((t) => t.id === taskId);
-      const sub = task && task.subtasks.find((s) => s.id === subId);
-      if (sub) sub.done = !sub.done;
-    });
-  }
-
-  function removeSubtask(taskId, subId) {
-    update((d) => {
-      const task = d.tasks.find((t) => t.id === taskId);
-      if (task) task.subtasks = task.subtasks.filter((s) => s.id !== subId);
-    });
-  }
 
   /** Fecha y hora límite como Date (hora por defecto: 23:59). */
   function dueDateTime(task) {
@@ -535,74 +471,11 @@ window.SF = (() => {
     return h ? `${h}h ${pad(m)}m` : `${m}m`;
   }
 
-  /* ---------- Datos de demostración ---------- */
-  function demoData() {
-    const today = todayKey();
-    const mk = (name, teacher, emoji, color, offset) => ({ id: uid(), name, teacher, emoji, color, createdAt: Date.now() + offset });
-    const calc = mk('Cálculo Diferencial', 'Dr. Ramírez Torres', '📐', 'red', 0);
-    const fis = mk('Física General II', 'Dra. López Vega', '⚛️', 'blue', 1);
-    const his = mk('Historia Universal', 'Mtro. Gutiérrez', '📜', 'amber', 2);
-    const lit = mk('Literatura Contemporánea', 'Mtra. Sánchez', '📚', 'purple', 3);
-    const qui = mk('Química Orgánica', 'Dr. Mendoza', '🧪', 'green', 4);
-    const pro = mk('Programación Avanzada', 'Ing. Flores', '💻', 'sky', 5);
-
-    const subs = (list, doneCount) => list.map((text, i) => ({ id: uid(), text, done: i < doneCount }));
-    const task = (title, subject, priority, offset, time, tags, subtasks, extra = {}) => ({
-      id: uid(), title, subjectId: subject.id, priority,
-      dueDate: offset === null ? '' : addDays(today, offset), dueTime: time, tags, notes: '',
-      subtasks, done: false, completedAt: null, createdAt: Date.now() + Math.random() * 1000, ...extra
-    });
-    const doneNow = { done: true, completedAt: new Date().toISOString() };
-
-    const sessions = [{ date: today, minutes: 52, at: Date.now() }, { date: today, minutes: 53, at: Date.now() }];
-    for (let i = 1; i <= 6; i += 1) sessions.push({ date: addDays(today, -i), minutes: 25, at: Date.now() });
-
-    return {
-      subjects: [calc, fis, his, lit, qui, pro],
-      tasks: [
-        task('Tarea de Cálculo Diferencial', calc, 'high', 0, '23:59', ['Parcial', 'Cálculo'], subs(['Ejercicios del Capítulo 4', 'Límites laterales', 'Derivadas básicas', 'Regla de la cadena', 'Repaso final'], 3), { notes: 'Ejercicios del capítulo 4, problemas 1-20' }),
-        task('Leer capítulos 5-7 de Historia', his, 'medium', 1, '09:00', ['Lectura'], subs(['Capítulo 5', 'Capítulo 6', 'Capítulo 7'], 1)),
-        task('Ejercicios de Química Orgánica', qui, 'medium', 3, '20:00', ['Lab'], subs(['Nomenclatura', 'Isomería', 'Reacciones', 'Guía de laboratorio'], 0)),
-        task('Ensayo de Literatura Contemporánea', lit, 'low', 6, '', ['Ensayo', 'Entrega'], []),
-        task('Preparar exposición de Historia', his, 'high', 10, '', ['Exposición'], subs(['Tema', 'Fuentes', 'Guion', 'Diapositivas', 'Ensayo general', 'Presentación'], 1)),
-        task('Resolver guía de Física', fis, 'medium', -1, '18:00', ['Guía'], [], doneNow),
-        task('Quiz de Programación', pro, 'low', 0, '10:00', ['Quiz'], [], doneNow),
-        task('Informe de laboratorio', qui, 'high', -2, '', ['Lab'], [], doneNow)
-      ],
-      pomodoro: { settings: defaultSettings(), sessions, timer: null }
-    };
-  }
-
-  async function startDemo() {
-    const email = 'sofia.martinez@unimilitar.edu.co';
-    const salt = 'demo';
-    saveAccount({
-      email,
-      name: 'Sofía',
-      lastName: 'Martínez Rojas',
-      university: 'Universidad Militar Nueva Granada',
-      career: 'Ingeniería en Sistemas Computacionales',
-      semester: '5',
-      avatar: '',
-      provider: 'demo',
-      createdAt: '2026-08-01T12:00:00.000Z',
-      salt,
-      passHash: await hashPassword('demo1234', salt)
-    });
-    write(KEYS.data(email), demoData());
-    login(email);
-  }
-
   /* ---------- Arranque de página ---------- */
   const ready = (async () => {
-    const params = new URLSearchParams(window.location.search);
-    if (params.get('demo') === '1') {
-      if (!currentUser()) await startDemo();
-      params.delete('demo');
-      const query = params.toString();
-      window.history.replaceState(null, '', window.location.pathname + (query ? `?${query}` : '') + window.location.hash);
-    }
-    await loadFromServer();   // ← Asegúrate de que esta línea esté aquí
+    purgeLegacyCredentials();
+    await verifySession();
+    await loadFromServer();
   })();
 
   const domReady = new Promise((resolve) => {
@@ -619,11 +492,11 @@ window.SF = (() => {
   return {
     COLORS, EMOJIS, MONTHS, MONTHS_SHORT, WEEKDAYS, PRIORITY,
     esc, uid, pad, toKey, fromKey, todayKey, addDays, onReady,
-    register, authenticate, checkPassword, setPassword, updateAccount, account, login, logout, currentUser, requireUser, fullName, initials,
+    register, authenticate, changePassword, updateAccount, account, login, logout, currentUser, requireUser, fullName, initials,
     data, subjects, subjectById, addSubject, updateSubject, removeSubject,
     tasks, taskById, addTask, updateTask, removeTask, toggleTask, addSubtask, toggleSubtask, removeSubtask,
     dueDateTime, isOverdue, taskFraction, formatDue, byDue, counts, subjectStats, daySummary, completedToday, reminders, reminderStyle,
     settings, saveSettings, recordSession, sessionsToday, minutesToday, streak, getTimer, saveTimer,
-    isNewUser, formatHours, formatMinutes, startDemo
+    isNewUser, formatHours, formatMinutes
   };
 })();

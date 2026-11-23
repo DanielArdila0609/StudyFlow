@@ -1,8 +1,7 @@
 /* =========================================================
    StudyFlow — Mi perfil
    Información personal editable, foto de perfil (guardada como
-   data URL local) y seguridad: cambiar contraseña o vincular una
-   si la cuenta todavía no tiene contraseña.
+   data URL local) y seguridad: cambiar la contraseña (la verifica el servidor).
    ========================================================= */
 
 (() => {
@@ -106,35 +105,6 @@
   function renderSecurity(user) {
     const body = $('securityBody');
 
-    if (!user.passHash) {
-      body.innerHTML = `
-        <p class="security-note">${icon('alert')}Tu cuenta todavía no tiene una contraseña. Puedes crear una para iniciar sesión con tu correo.</p>
-        <form class="security-form" id="setPasswordForm" novalidate>
-          <div class="field-row">
-            <div class="field"><label for="newPass1">Nueva contraseña</label>
-              <div class="input-wrap"><input type="password" id="newPass1" name="password" placeholder="Mínimo 8 caracteres" autocomplete="new-password" required><button type="button" class="input-wrap__toggle" data-toggle-password aria-label="Mostrar contraseña" aria-pressed="false"></button></div>
-            </div>
-            <div class="field"><label for="newPass2">Confirmar contraseña</label>
-              <div class="input-wrap"><input type="password" id="newPass2" name="confirm" placeholder="Repite la contraseña" autocomplete="new-password" required><button type="button" class="input-wrap__toggle" data-toggle-password aria-label="Mostrar contraseña" aria-pressed="false"></button></div>
-            </div>
-          </div>
-          <p class="form-error" role="alert" hidden></p>
-          <div class="profile-form__actions"><button type="submit" class="btn btn--primary btn--sm">${icon('key')}Crear contraseña</button></div>
-        </form>`;
-      UI.setupPasswordToggles(body);
-      body.querySelector('#setPasswordForm').addEventListener('submit', async (event) => {
-        event.preventDefault();
-        const form = event.target;
-        UI.clearErrors(form);
-        if (form.password.value.length < 8) { UI.setFieldError(form.password, 'La contraseña debe tener al menos 8 caracteres.'); return; }
-        if (form.confirm.value !== form.password.value) { UI.setFieldError(form.confirm, 'Las contraseñas no coinciden.'); return; }
-        await SF.setPassword(user.email, form.password.value);
-        UI.toast('Ya puedes iniciar sesión con tu correo y contraseña');
-        render();
-      });
-      return;
-    }
-
     body.innerHTML = `
       <h3 class="security-form__title">Cambiar contraseña</h3>
       <form class="security-form" id="changePasswordForm" novalidate>
@@ -158,12 +128,16 @@
       const form = event.target;
       UI.clearErrors(form);
 
-      const ok = await SF.checkPassword(form.current.value);
-      if (!ok) { UI.setFieldError(form.current, 'La contraseña actual no es correcta.'); return; }
+      if (!form.current.value) { UI.setFieldError(form.current, 'Escribe tu contraseña actual.'); return; }
       if (form.password.value.length < 8) { UI.setFieldError(form.password, 'La contraseña debe tener al menos 8 caracteres.'); return; }
       if (form.confirm.value !== form.password.value) { UI.setFieldError(form.confirm, 'Las contraseñas no coinciden.'); return; }
 
-      await SF.setPassword(user.email, form.password.value);
+      try {
+        await SF.changePassword(form.current.value, form.password.value);
+      } catch (error) {
+        UI.formError(form, error.status === 401 ? 'Tu sesión expiró. Inicia sesión de nuevo.' : error.message);
+        return;
+      }
       UI.toast('Contraseña actualizada');
       form.reset();
     });

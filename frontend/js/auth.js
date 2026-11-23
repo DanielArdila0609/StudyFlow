@@ -1,5 +1,5 @@
 /* =========================================================
-   StudyFlow — Autenticación (simulada, sin backend)
+   StudyFlow — Autenticación (servidor + sesión por cookie HttpOnly)
    Iniciar sesión, crear cuenta y recuperar contraseña.
    ========================================================= */
 
@@ -49,17 +49,19 @@
       if (!password) { UI.setFieldError(form.password, 'Escribe tu contraseña.'); valid = false; }
       if (!valid) return;
 
-      const account = await SF.authenticate(email, password);
-      if (!account) {
-        const existing = SF.account(email);
-        UI.formError(form, existing && !existing.passHash
-          ? 'Esta cuenta todavía no tiene una contraseña. Usa «¿Olvidaste tu contraseña?» para crear una.'
-          : 'Correo o contraseña incorrectos.');
-        return;
+      const submit = form.querySelector('[type="submit"]');
+      if (submit) submit.disabled = true;
+      try {
+        const account = await SF.authenticate(email, password);
+        if (!account) { UI.formError(form, 'Correo o contraseña incorrectos.'); return; }
+        window.location.href = DASHBOARD;
+      } catch (error) {
+        UI.formError(form, error.status === 429 || error.status === 400
+          ? error.message
+          : 'No se pudo iniciar sesión. Inténtalo nuevamente.');
+      } finally {
+        if (submit) submit.disabled = false;
       }
-
-      SF.login(email);
-      window.location.href = DASHBOARD;
     });
   }
 
@@ -86,9 +88,10 @@
       try {
         await SF.register({ fullName, email, password });
       } catch (error) {
-        UI.setFieldError(form.email, error && error.message === 'exists'
+        const status = error && error.status;
+        UI.setFieldError(form.email, status === 409
           ? 'Este correo ya tiene una cuenta. Inicia sesión.'
-          : 'No se pudo crear la cuenta. Inténtalo nuevamente.');
+          : (status === 400 || status === 429 ? error.message : 'No se pudo crear la cuenta. Inténtalo nuevamente.'));
         if (submit) { submit.disabled = false; submit.textContent = 'Crear cuenta gratis'; }
         return;
       }
@@ -108,54 +111,17 @@
     });
   }
 
-  /* ---------- Recuperar contraseña ---------- */
+  /* ---------- Recuperar contraseña ----------
+     Restablecer una contraseña solo con el correo no es seguro. Hace falta enviar un
+     enlace de un solo uso por correo (aún no hay servicio de correo configurado), así que
+     por ahora la página lo dice con claridad en lugar de simular el proceso. */
   function setupRecover() {
-    const recover = document.getElementById('recoverForm');
-    const reset = document.getElementById('resetForm');
-    const done = document.getElementById('resetDone');
-    const title = document.getElementById('authTitle');
-    const subtitle = document.getElementById('recoverSubtitle');
-    const badge = document.getElementById('recoverIcon');
-    let targetEmail = '';
-
-    const setHeader = (ico, text, sub) => {
-      badge.innerHTML = icon(ico);
-      title.textContent = text;
-      subtitle.textContent = sub;
-    };
-    setHeader('mail', '¿Olvidaste tu contraseña?', 'Ingresa tu correo y te enviaremos un enlace para restablecer tu contraseña.');
-
-    recover.addEventListener('submit', (event) => {
-      event.preventDefault();
-      UI.clearErrors(recover);
-      const email = recover.email.value.trim();
-
-      if (!UI.validEmail(email)) { UI.setFieldError(recover.email, 'Escribe un correo electrónico válido.'); return; }
-      if (!SF.account(email)) { UI.setFieldError(recover.email, 'No encontramos una cuenta con ese correo.'); return; }
-
-      targetEmail = email;
-      setHeader('lock', 'Crea una nueva contraseña', `Cuenta: ${email}`);
-      recover.hidden = true;
-      reset.hidden = false;
-      reset.password.focus();
-    });
-
-    reset.addEventListener('submit', async (event) => {
-      event.preventDefault();
-      UI.clearErrors(reset);
-      let valid = true;
-
-      if (reset.password.value.length < 8) { UI.setFieldError(reset.password, 'La contraseña debe tener al menos 8 caracteres.'); valid = false; }
-      if (reset.confirm.value !== reset.password.value) { UI.setFieldError(reset.confirm, 'Las contraseñas no coinciden.'); valid = false; }
-      if (!valid) return;
-
-      await SF.setPassword(targetEmail, reset.password.value);
-      setHeader('check', '¡Contraseña actualizada!', 'Ya puedes iniciar sesión con tu nueva contraseña.');
-      document.getElementById('recoverFooter').hidden = true;
-      reset.hidden = true;
-      done.hidden = false;
-      done.querySelector('a').focus();
-    });
+    document.getElementById('recoverIcon').innerHTML = icon('mail');
+    document.getElementById('authTitle').textContent = 'Recuperar contraseña';
+    document.getElementById('recoverSubtitle').textContent =
+      'La recuperación por correo todavía no está disponible. Si ya tienes sesión iniciada, puedes cambiar tu contraseña en Mi perfil.';
+    document.getElementById('recoverForm').hidden = true;
+    document.getElementById('resetForm').hidden = true;
   }
 
   /* ---------- Mockup decorativo (lado izquierdo) ---------- */

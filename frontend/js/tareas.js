@@ -428,7 +428,12 @@
       SF.updateTask(editingId, payload);
       UI.toast('Tarea actualizada');
     } else {
-      await SF.addTask(payload);
+      try {
+        await SF.addTask(payload);
+      } catch (error) {
+        UI.toast(`No se pudo crear la tarea: ${error.message}`, 'error');
+        return;
+      }
       state.tab = 'pending';
       UI.toast('Tarea creada');
     }
