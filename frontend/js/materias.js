@@ -168,7 +168,16 @@
       SF.updateSubject(editingId, payload);
       UI.toast('Materia actualizada');
     } else {
-      await SF.addSubject(payload);
+      const submit = $('subjectSubmit');
+      submit.disabled = true; // evita duplicados si el servidor tarda en responder
+      try {
+        await SF.addSubject(payload);
+      } catch (error) {
+        UI.toast(`No se pudo crear la materia: ${error.message}`, 'error');
+        return;
+      } finally {
+        submit.disabled = false;
+      }
       UI.toast('Materia creada');
     }
 

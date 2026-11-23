@@ -8,22 +8,35 @@ window.API = (() => {
   const BASE_URL = '/api';
 
   async function request(path, { method = 'GET', body, keepalive = false } = {}) {
-    const response = await fetch(`${BASE_URL}${path}`, {
-      method,
-      credentials: 'same-origin',
-      keepalive,
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Requested-With': 'StudyFlow' // exigida por el backend (protección CSRF)
-      },
-      body: body ? JSON.stringify(body) : undefined
-    });
+    let response;
+    try {
+      response = await fetch(`${BASE_URL}${path}`, {
+        method,
+        credentials: 'same-origin',
+        keepalive,
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Requested-With': 'StudyFlow' // exigida por el backend (protección CSRF)
+        },
+        body: body ? JSON.stringify(body) : undefined
+      });
+    } catch (cause) {
+      // Sin red, o Render (plan gratuito) todavía está despertando el servidor.
+      const error = new Error('No se pudo conectar con el servidor. Si acaba de despertar, espera unos segundos e inténtalo de nuevo.');
+      error.status = 0;
+      error.transient = true;
+      throw error;
+    }
 
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) {
-      const message = payload.error || (payload.errors || []).join(' ') || `Error ${response.status}`;
+      const transient = response.status === 502 || response.status === 503 || response.status === 504;
+      const message = transient
+        ? 'El servidor está iniciando o no responde. Espera unos segundos e inténtalo de nuevo.'
+        : payload.error || (payload.errors || []).join(' ') || `Error ${response.status}`;
       const error = new Error(message);
       error.status = response.status;
+      error.transient = transient;
       throw error;
     }
     return payload;

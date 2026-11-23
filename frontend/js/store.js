@@ -211,7 +211,7 @@ window.SF = (() => {
   }
 
   /* ---------- Sincronización con el backend ---------- */
-  async function loadFromServer() {
+  async function loadFromServer(quiet = false) {
     if (!window.API || !currentUser()) return; // páginas públicas no consultan el backend
     try {
       const [subjects, tasks] = await Promise.all([API.listSubjects(), API.listTasks()]);
@@ -220,6 +220,16 @@ window.SF = (() => {
     } catch (error) {
       if (error.status === 401) { clearSession(); window.location.replace('iniciar-sesion.html'); return; }
       console.error('No se pudieron cargar los datos del backend:', error.message);
+      // Sin este aviso la pantalla quedaría vacía y parecería que se perdieron los datos.
+      if (!quiet && window.SFUI) window.SFUI.toast(`No se pudieron cargar tus datos. ${error.message}`, 'error');
+    }
+  }
+
+  // Si la sesión expiró (401) al guardar, limpia la pista local y vuelve al inicio de sesión.
+  function handleExpiredSession(error) {
+    if (error && error.status === 401) {
+      clearSession();
+      window.location.replace('iniciar-sesion.html');
     }
   }
 
@@ -227,7 +237,7 @@ window.SF = (() => {
   function sync(request, errorMessage) {
     request.catch(async (error) => {
       console.error(errorMessage, error);
-      await loadFromServer();
+      await loadFromServer(true); // el aviso de abajo ya informa del fallo
       emit();
       if (window.SFUI) window.SFUI.toast(`${errorMessage}: ${error.message}`, 'error');
     });
@@ -238,12 +248,15 @@ window.SF = (() => {
 
 // Async: el ID lo genera Firestore, así que se espera la respuesta
   async function addSubject({ name, teacher = '', emoji, color }) {
-    const created = await API.createSubject({
-      name: name.trim(),
-      teacher: String(teacher).trim(),
-      emoji: emoji || EMOJIS[0],
-      color: color || COLORS[0]
-    });
+    let created;
+    try {
+      created = await API.createSubject({
+        name: name.trim(),
+        teacher: String(teacher).trim(),
+        emoji: emoji || EMOJIS[0],
+        color: color || COLORS[0]
+      });
+    } catch (error) { handleExpiredSession(error); throw error; }
     update((d) => { d.subjects.push(created); });
     return created;
   }
@@ -265,7 +278,10 @@ window.SF = (() => {
   }
 
   async function addTask({ title, subjectId = '', priority = 'medium', dueDate = '', dueTime = '', tags = [], notes = '' }) {
-    const created = await API.createTask({ title: title.trim(), subjectId, priority, dueDate, dueTime, tags, notes });
+    let created;
+    try {
+      created = await API.createTask({ title: title.trim(), subjectId, priority, dueDate, dueTime, tags, notes });
+    } catch (error) { handleExpiredSession(error); throw error; }
     update((d) => { d.tasks.push(created); });
     return created;
   }

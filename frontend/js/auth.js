@@ -56,7 +56,7 @@
         if (!account) { UI.formError(form, 'Correo o contraseña incorrectos.'); return; }
         window.location.href = DASHBOARD;
       } catch (error) {
-        UI.formError(form, error.status === 429 || error.status === 400
+        UI.formError(form, error.status === 429 || error.status === 400 || error.transient
           ? error.message
           : 'No se pudo iniciar sesión. Inténtalo nuevamente.');
       } finally {
@@ -91,7 +91,7 @@
         const status = error && error.status;
         UI.setFieldError(form.email, status === 409
           ? 'Este correo ya tiene una cuenta. Inicia sesión.'
-          : (status === 400 || status === 429 ? error.message : 'No se pudo crear la cuenta. Inténtalo nuevamente.'));
+          : (status === 400 || status === 429 || (error && error.transient) ? error.message : 'No se pudo crear la cuenta. Inténtalo nuevamente.'));
         if (submit) { submit.disabled = false; submit.textContent = 'Crear cuenta gratis'; }
         return;
       }

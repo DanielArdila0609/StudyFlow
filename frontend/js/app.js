@@ -31,6 +31,11 @@
 
     document.addEventListener('sf:change', updateShell);
     updateShell();
+
+    // Tras cerrar sesión (también desde otra pestaña o con «atrás») no se deja ver la pantalla privada.
+    const leaveIfLoggedOut = () => { if (!window.SF.currentUser()) window.location.replace('iniciar-sesion.html'); };
+    window.addEventListener('pageshow', (event) => { if (event.persisted) leaveIfLoggedOut(); });
+    window.addEventListener('storage', (event) => { if (event.key === 'studyflow:session') leaveIfLoggedOut(); });
   });
 
   /* ---------- Estructura ---------- */
